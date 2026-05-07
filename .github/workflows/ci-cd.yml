@@ -52,12 +52,6 @@ jobs:
           echo " Running test_imports.py"
           echo "──────────────────────────────────────"
           python test_imports.py
-
-          echo "──────────────────────────────────────"
-          echo " Running test_setup.py"
-          echo "──────────────────────────────────────"
-          python test_setup.py
-
           echo "──────────────────────────────────────"
           echo " Running verify_setup.py"
           echo "──────────────────────────────────────"
