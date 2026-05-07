@@ -1,0 +1,166 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  CI/CD Pipeline – Fraudulent Transaction Anomaly Detection
+#  Course : INT332 – DevOps | Lovely Professional University
+#  Tools  : Docker + GitHub Actions
+#  Trigger: Push or Pull Request to master branch
+# ═══════════════════════════════════════════════════════════════════════
+
+name: CI/CD Pipeline – Fraud Detection
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1 ▸ BUILD & TEST
+  # Install dependencies and run all test suites
+  # ─────────────────────────────────────────────────────────────────
+  build-and-test:
+    name: 🔧 Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ✅ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set Up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Cache pip Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 📥 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: 🧪 Run Test Suite
+        run: |
+          echo "──────────────────────────────────────"
+          echo " Running test_imports.py"
+          echo "──────────────────────────────────────"
+          python test_imports.py
+
+          echo "──────────────────────────────────────"
+          echo " Running test_setup.py"
+          echo "──────────────────────────────────────"
+          python test_setup.py
+
+          echo "──────────────────────────────────────"
+          echo " Running verify_setup.py"
+          echo "──────────────────────────────────────"
+          python verify_setup.py
+
+          echo "✅ All tests passed!"
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2 ▸ DOCKER BUILD & PUSH
+  # Runs only after build-and-test succeeds
+  # ─────────────────────────────────────────────────────────────────
+  docker-build-push:
+    name: 🐳 Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: build-and-test          # Gate: only runs if tests pass
+
+    steps:
+      - name: ✅ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 🏷️ Extract Metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/fraud-detection-396
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: 🏗️ Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false          # Build first, verify, then push
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: 🚀 Push Docker Image to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: 📋 Print Image Details
+        run: |
+          echo "══════════════════════════════════════════"
+          echo "  Docker image pushed successfully!"
+          echo "  Tags: ${{ steps.meta.outputs.tags }}"
+          echo "  Commit SHA: ${{ github.sha }}"
+          echo "══════════════════════════════════════════"
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3 ▸ DEPLOY (Container smoke test)
+  # Pulls the image and runs a quick smoke test
+  # ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚢 Deploy & Smoke Test
+    runs-on: ubuntu-latest
+    needs: docker-build-push       # Gate: only runs if image was pushed
+
+    steps:
+      - name: 🔐 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 📥 Pull Image from Docker Hub
+        run: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/fraud-detection-396:latest
+
+      - name: 🧪 Run Container Smoke Test
+        run: |
+          echo "Starting container smoke test..."
+          docker run --rm \
+            --name fraud-detection-smoke \
+            ${{ secrets.DOCKER_USERNAME }}/fraud-detection-396:latest \
+            python -c "
+          import sys
+          print('Python version:', sys.version)
+          import pandas, numpy, sklearn, torch
+          print('pandas:', pandas.__version__)
+          print('numpy:', numpy.__version__)
+          print('scikit-learn:', sklearn.__version__)
+          print('torch:', torch.__version__)
+          print('✅ Container smoke test PASSED – all imports OK')
+          "
+
+      - name: 🎉 Pipeline Complete
+        run: |
+          echo "══════════════════════════════════════════"
+          echo "  ✅ CI/CD Pipeline completed successfully!"
+          echo ""
+          echo "  Stages completed:"
+          echo "  1. ✅ Build & Test       – passed"
+          echo "  2. ✅ Docker Build/Push  – image on Docker Hub"
+          echo "  3. ✅ Deploy/Smoke Test  – container running"
+          echo "══════════════════════════════════════════"
